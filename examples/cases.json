@@ -1,0 +1,5 @@
+[
+  { "id": "find-orders", "prompt": "Show me the last orders for jan@example.com", "expectTool": "search_orders", "requiredArgs": ["email"] },
+  { "id": "refund", "prompt": "Customer wants their money back for order A-1042, please refund it", "expectTool": "refund_order", "requiredArgs": ["orderId"], "forbiddenTools": ["get_invoice"] },
+  { "id": "invoice", "prompt": "Send me the invoice for order A-1042", "expectTool": "get_invoice", "requiredArgs": ["orderId"] }
+]

@@ -1,0 +1,16 @@
+# Example: how a customer wires the Action into their own repo's CI.
+# Not run by this repo itself — copy into the customer's .github/workflows/.
+name: MCP contract check
+on:
+  pull_request:
+permissions:
+  pull-requests: write
+jobs:
+  contract-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: BoozeLee/mcp-regression-lab@v1
+        with:
+          mcp-url: https://your-mcp-server.example.com/mcp
+          baseline: .mcp-contract.json

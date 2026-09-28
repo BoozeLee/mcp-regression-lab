@@ -1,0 +1,5 @@
+node_modules/
+*.json.bak
+current.json
+diff.json
+lint.json

@@ -1,0 +1,88 @@
+name: "MCP Contract Regression Check"
+description: "Checks a remote MCP server for contract and behaviour regressions and comments the result on the PR. Runs locally against a committed baseline, or through MCP Regression Lab when api-token is set."
+inputs:
+  mcp-url:
+    description: "Remote streamable-HTTP MCP server URL to snapshot (local mode)"
+    required: false
+  baseline:
+    description: "Path to the committed baseline contract JSON, e.g. .mcp-contract.json (local mode)"
+    required: false
+  api-token:
+    description: "MCP Regression Lab API token; setting it switches to hosted mode (approved baseline + golden tests)"
+    required: false
+  server-id:
+    description: "Server id from the MCP Regression Lab dashboard URL (hosted mode)"
+    required: false
+  hosted-url:
+    description: "MCP Regression Lab base URL (hosted mode)"
+    required: false
+    default: "https://mcp-regression-lab.vercel.app"
+  mcp-token:
+    description: "Optional bearer token for the MCP server"
+    required: false
+  github-token:
+    description: "Token used to post the PR comment"
+    required: false
+    default: ${{ github.token }}
+outputs:
+  breaking-changes:
+    description: "Number of breaking changes found"
+    value: ${{ steps.diff.outputs.breaking || steps.hosted.outputs.breaking }}
+  golden-regressions:
+    description: "Number of golden cases whose pass rate dropped (hosted mode)"
+    value: ${{ steps.hosted.outputs.golden-regressions }}
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "24"
+    - name: Install
+      shell: bash
+      run: npm ci --omit=dev
+      working-directory: ${{ github.action_path }}
+    - name: Hosted check
+      id: hosted
+      if: ${{ inputs.api-token != '' }}
+      shell: bash
+      env:
+        HOSTED_URL: ${{ inputs.hosted-url }}
+        API_TOKEN: ${{ inputs.api-token }}
+        SERVER_ID: ${{ inputs.server-id }}
+      run: node "${{ github.action_path }}/scripts/hosted-check.ts"
+    - name: Snapshot current contract
+      if: ${{ inputs.api-token == '' }}
+      shell: bash
+      env:
+        MCP_TOKEN: ${{ inputs.mcp-token }}
+      run: node "${{ github.action_path }}/src/cli.ts" snapshot "${{ inputs.mcp-url }}" -o current.json
+    - name: Diff against baseline
+      id: diff
+      if: ${{ inputs.api-token == '' }}
+      shell: bash
+      run: |
+        node "${{ github.action_path }}/src/cli.ts" diff "${{ inputs.baseline }}" current.json --json -o diff.json || true
+        node "${{ github.action_path }}/src/cli.ts" lint current.json --json -o lint.json
+        echo "breaking=$(node -e "console.log(JSON.parse(require('fs').readFileSync('diff.json')).filter(c=>c.severity==='breaking').length)")" >> "$GITHUB_OUTPUT"
+    - name: Comment on PR
+      if: ${{ github.event.pull_request.number }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        node "${{ github.action_path }}/scripts/post-comment.ts" \
+          --diff diff.json --lint lint.json --server "${{ inputs.mcp-url || inputs.server-id }}" \
+          --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" \
+          --token "$GITHUB_TOKEN"
+    - name: Fail on breaking change (local mode)
+      if: ${{ inputs.api-token == '' && steps.diff.outputs.breaking != '0' }}
+      shell: bash
+      run: |
+        echo "::error::MCP contract check failed: ${{ steps.diff.outputs.breaking }} breaking change(s) against ${{ inputs.baseline }}"
+        exit 1
+    - name: Fail on regression (hosted mode)
+      if: ${{ inputs.api-token != '' && steps.hosted.outputs.ok != 'true' }}
+      shell: bash
+      run: |
+        echo "::error::MCP regression check failed: status=${{ steps.hosted.outputs.status }}, breaking=${{ steps.hosted.outputs.breaking }}, golden regressions=${{ steps.hosted.outputs.golden-regressions }}"
+        exit 1
