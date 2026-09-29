@@ -70,6 +70,12 @@ export async function snapshot(
   timeoutMs = 15_000,
   fetchImpl?: typeof fetch,
 ): Promise<Contract> {
+  const deadline = Date.now() + timeoutMs;
+  const remaining = () => {
+    const ms = deadline - Date.now();
+    if (ms <= 0) throw new Error(`timed out after ${timeoutMs}ms`);
+    return ms;
+  };
   const headers: Record<string, string> = token
     ? { Authorization: `Bearer ${token}` }
     : {};
@@ -78,29 +84,36 @@ export async function snapshot(
     ...(fetchImpl && { fetch: fetchImpl }),
   });
   const client = new Client({ name: "mcp-regression-lab", version: "0.1.0" });
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
       () => reject(new Error(`timed out after ${timeoutMs}ms`)),
       timeoutMs,
-    ).unref(),
-  );
+    );
+    timer.unref();
+  });
   try {
     await Promise.race([client.connect(transport), timeout]);
+    clearTimeout(timer!);
     const tools: Tool[] = [];
     let cursor: string | undefined;
     do {
       const page = await client.listTools(cursor ? { cursor } : {}, {
-        timeout: timeoutMs,
+        timeout: remaining(),
       });
       tools.push(...(page.tools as Tool[]));
+      if (tools.length > 1_000)
+        throw new Error("server returned more than 1000 tools");
       cursor = page.nextCursor;
     } while (cursor);
     return normalize(redactUrl(url), tools);
   } catch (err) {
+    const message = (err as Error).message;
     throw new Error(
-      `snapshot of ${redactUrl(url)} failed: ${(err as Error).message}`,
+      `snapshot of ${redactUrl(url)} failed: ${token ? message.split(token).join("***") : message}`,
     );
   } finally {
+    clearTimeout(timer!);
     await client.close().catch(() => {});
   }
 }
@@ -283,7 +296,7 @@ export function lintContract(contract: Contract): Change[] {
 
 /** Breaking changes in `current` that `previous` did not already report — what's worth an alert. */
 export function newBreaking(previous: Change[], current: Change[]): Change[] {
-  const key = (c: Change) => `${c.tool}\u0000${c.kind}`;
+  const key = (c: Change) => `${c.tool}\u0000${c.kind}\u0000${c.detail}`;
   const known = new Set(previous.filter((c) => c.severity === "breaking").map(key));
   return current.filter((c) => c.severity === "breaking" && !known.has(key(c)));
 }

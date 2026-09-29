@@ -6,20 +6,38 @@ import { parseArgs } from 'node:util';
 import type { Change } from '../src/contract.ts';
 
 const MARKER = '<!-- mcp-regression-lab -->';
+const MAX_ITEMS = 100;
+
+const markdown = (value: string, max = 500) =>
+  value
+    .slice(0, max)
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/@/g, '&#64;')
+    .replace(/([\\`*_{}\[\]()#+.!|~])/g, '\\$1');
 
 export function renderComment(server: string, changes: Change[], lint: Change[]): string {
   const breaking = changes.filter((c) => c.severity === 'breaking');
   const heading = breaking.length
-    ? `### :warning: MCP contract check — ${breaking.length} breaking change(s)`
-    : '### :white_check_mark: MCP contract check — no breaking changes';
-  const list = (items: Change[]) =>
-    items.length ? items.map((c) => `- **${c.severity}** \`${c.kind}\` on \`${c.tool}\`: ${c.detail}`).join('\n') : '_none_';
+    ? `### :warning: MCP regression check — ${breaking.length} blocking finding(s)`
+    : '### :white_check_mark: MCP regression check — no blocking findings';
+  const list = (items: Change[]) => {
+    if (!items.length) return '_none_';
+    const rows = items.slice(0, MAX_ITEMS).map(
+      (c) => `- **${c.severity}** ${markdown(c.kind)} on ${markdown(c.tool)}: ${markdown(c.detail)}`,
+    );
+    if (items.length > MAX_ITEMS)
+      rows.push(`- _${items.length - MAX_ITEMS} more finding(s) omitted_`);
+    return rows.join('\n');
+  };
   return `${MARKER}
 ${heading}
 
-Server: \`${server}\`
+Server: ${markdown(server)}
 
-**Contract diff**
+**Regression findings**
 ${list(changes)}
 
 <details><summary>Hygiene lint (${lint.length})</summary>

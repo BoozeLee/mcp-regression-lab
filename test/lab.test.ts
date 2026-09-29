@@ -124,6 +124,18 @@ test('fixture 8: endpoint times out', async () => {
   }
 });
 
+test('snapshot rejects an unbounded tool list', async () => {
+  const srv = await startServer((s) => {
+    for (let i = 0; i <= 1_000; i++)
+      s.registerTool(`tool_${i}`, { description: `tool ${i}` }, ok);
+  });
+  try {
+    await assert.rejects(snapshot(srv.url), /more than 1000 tools/);
+  } finally {
+    await srv.close();
+  }
+});
+
 test('runGolden computes pass rates and survives model errors', async () => {
   let n = 0;
   const flaky = async () => {
@@ -158,4 +170,8 @@ test('newBreaking only reports breaks the previous check did not already have', 
   // A non-breaking change never alerts, and a fixed break followed by the same break again re-alerts.
   assert.deepEqual(newBreaking([], [{ ...brk('x', 'desc'), severity: 'changed' }]), []);
   assert.deepEqual(newBreaking([], known).length, 1);
+  assert.equal(
+    newBreaking(known, [{ ...known[0], detail: 'a different removed argument' }]).length,
+    1,
+  );
 });

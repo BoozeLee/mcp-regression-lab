@@ -3,7 +3,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { renderComment } from '../scripts/post-comment.ts';
 
@@ -11,10 +13,24 @@ const run = promisify(execFile);
 
 test('renderComment marks breaking vs clean and lists lint findings', () => {
   const breaking = renderComment('https://x/mcp', [{ severity: 'breaking', kind: 'tool-removed', tool: 't', detail: 'gone' }], []);
-  assert.match(breaking, /warning.*1 breaking change/);
+  assert.match(breaking, /warning.*1 blocking finding/);
   const clean = renderComment('https://x/mcp', [], [{ severity: 'warning', kind: 'thin-description', tool: 't', detail: 'short' }]);
   assert.match(clean, /white_check_mark/);
   assert.match(clean, /thin-description/);
+});
+
+test('renderComment neutralizes hostile Markdown and bounds output', () => {
+  const hostile = {
+    severity: 'warning' as const,
+    kind: 'thin-description',
+    tool: '`tool`\n@octocat',
+    detail: '[click](https://evil.example) <img src=x>',
+  };
+  const body = renderComment('@octocat', [], Array.from({ length: 101 }, () => hostile));
+  assert.ok(!body.includes('@octocat'));
+  assert.ok(!body.includes('[click](https://evil.example)'));
+  assert.ok(!body.includes('<img'));
+  assert.match(body, /1 more finding\(s\) omitted/);
 });
 
 // Minimal mock of the two GitHub REST endpoints post-comment.ts calls: list comments (GET) and create/update (POST/PATCH).
@@ -80,4 +96,60 @@ test('exits 1 when a breaking change is present', async () => {
     await gh.close();
   }
   assert.equal(code, 1);
+});
+
+test('hosted check writes golden regressions into the shared PR findings', async () => {
+  let status = 200;
+  let response = {
+    ok: false,
+    status: 'clean',
+    error: null as string | null,
+    breaking: [],
+    changes: [],
+    lint: [],
+    golden: {
+      passRate: 0,
+      error: null,
+      regressions: [{ prompt: 'refund order', expectTool: 'refund', passRate: 0 }],
+    } as { passRate: number; error: string | null; regressions: { prompt: string; expectTool: string; passRate: number }[] } | null,
+    dashboardUrl: 'https://example.test/dashboard/servers/server-id',
+  };
+  const http = createServer((_req, res) => {
+    res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(response));
+  });
+  await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
+  const { port } = http.address() as AddressInfo;
+  const dir = mkdtempSync(join(tmpdir(), 'mrl-hosted-check-'));
+  try {
+    await run('node', [join(process.cwd(), 'scripts/hosted-check.ts')], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        HOSTED_URL: `http://127.0.0.1:${port}`,
+        API_TOKEN: 'mrl_test',
+        SERVER_ID: 'server-id',
+        GITHUB_OUTPUT: join(dir, 'output'),
+      },
+    });
+    const findings = JSON.parse(readFileSync(join(dir, 'diff.json'), 'utf8'));
+    assert.deepEqual(findings.map((f: { kind: string }) => f.kind), ['golden-regression']);
+    assert.match(readFileSync(join(dir, 'output'), 'utf8'), /^ok=false$/m);
+
+    status = 503;
+    response = { ...response, error: 'temporarily unavailable', golden: null };
+    const failedDir = mkdtempSync(join(tmpdir(), 'mrl-hosted-check-failed-'));
+    await run('node', [join(process.cwd(), 'scripts/hosted-check.ts')], {
+      cwd: failedDir,
+      env: {
+        ...process.env,
+        HOSTED_URL: `http://127.0.0.1:${port}`,
+        API_TOKEN: 'mrl_test',
+        SERVER_ID: 'server-id',
+      },
+    });
+    const failed = JSON.parse(readFileSync(join(failedDir, 'diff.json'), 'utf8'));
+    assert.deepEqual(failed.map((f: { kind: string }) => f.kind), ['check-failed']);
+  } finally {
+    await new Promise<void>((resolve) => http.close(() => resolve()));
+  }
 });
