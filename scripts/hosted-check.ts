@@ -45,7 +45,29 @@ async function main() {
       `hosted check failed (${res.status}): ${body.error ?? "no details"}`,
     );
 
-  writeFileSync("diff.json", JSON.stringify(body.changes, null, 2));
+  const findings = [...body.changes];
+  if (body.error)
+    findings.push({
+      severity: "breaking",
+      kind: "check-failed",
+      tool: SERVER_ID,
+      detail: body.error,
+    });
+  if (body.golden?.error)
+    findings.push({
+      severity: "breaking",
+      kind: "golden-run-failed",
+      tool: SERVER_ID,
+      detail: body.golden.error,
+    });
+  for (const regression of body.golden?.regressions ?? [])
+    findings.push({
+      severity: "breaking",
+      kind: "golden-regression",
+      tool: regression.expectTool,
+      detail: `pass rate fell to ${Math.round(regression.passRate * 100)}% for prompt "${regression.prompt}"`,
+    });
+  writeFileSync("diff.json", JSON.stringify(findings, null, 2));
   writeFileSync("lint.json", JSON.stringify(body.lint, null, 2));
   output("ok", body.ok);
   output("status", body.status);
@@ -61,10 +83,25 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error((err as Error).message);
+  const message = (err as Error).message;
+  console.error(message);
   // A check that couldn't run is not a pass.
   output("ok", false);
   output("status", "error");
-  writeFileSync("diff.json", "[]");
+  writeFileSync(
+    "diff.json",
+    JSON.stringify(
+      [
+        {
+          severity: "breaking",
+          kind: "check-failed",
+          tool: SERVER_ID ?? "unknown-server",
+          detail: message,
+        },
+      ],
+      null,
+      2,
+    ),
+  );
   writeFileSync("lint.json", "[]");
 });
