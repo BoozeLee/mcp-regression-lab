@@ -13,7 +13,7 @@ golden "prompt → expected tool" tests on a **local** model.
 Remote streamable-HTTP servers only. Bearer token via `MCP_TOKEN` env var; it is never written to disk,
 and URL query strings are stripped from saved contracts.
 
-## Usage (Node ≥ 23.6, no build step)
+## Usage (Node ≥ 24, no build step)
 
 ```sh
 npm install
