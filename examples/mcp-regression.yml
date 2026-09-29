@@ -8,7 +8,7 @@ jobs:
   contract-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: BoozeLee/mcp-regression-lab@v1
         with:
           mcp-url: https://your-mcp-server.example.com/mcp
