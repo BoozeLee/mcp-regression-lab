@@ -76,3 +76,16 @@ comment (`scripts/post-comment.ts`, plain `fetch` against the GitHub REST API â€
 ```
 
 Fails on a breaking change or a golden-test pass-rate drop. Outputs: `breaking-changes`, `golden-regressions`.
+
+### Version selection
+
+- `BoozeLee/mcp-regression-lab@v1` follows the latest backwards-compatible v1 release.
+- `BoozeLee/mcp-regression-lab@v1.0.0` pins the immutable first stable release.
+- Pin to a full commit SHA when your organization requires the strongest dependency-integrity
+  control; verify the SHA against the matching GitHub release before adoption.
+
+## Security and support
+
+Do not include MCP tokens, model keys, API tokens, or server credentials in issues, pull requests,
+or contract artifacts. Read [SECURITY.md](SECURITY.md) before reporting a vulnerability and
+[CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
