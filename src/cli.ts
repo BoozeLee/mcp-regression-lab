@@ -4,6 +4,8 @@ import { parseArgs } from 'node:util';
 import { type Change, type Contract, diffContracts, lintContract, snapshot } from './contract.ts';
 import { type GoldenCase, type GoldenResult, ollamaAsk, runGolden } from './golden.ts';
 import { renderReport } from './report.ts';
+import { guardedFetch } from './hosted.ts';
+import { resolveOllamaUrl } from './ollama-url.ts';
 
 const USAGE = `mcp-lab <command>
   snapshot <url> -o contract.json          (bearer token from MCP_TOKEN env)
@@ -41,7 +43,7 @@ async function main(): Promise<number> {
   switch (command) {
     case 'snapshot': {
       if (!a) break;
-      const contract = await snapshot(a, process.env.MCP_TOKEN);
+      const contract = await snapshot(a, process.env.MCP_TOKEN, 15_000, guardedFetch);
       output(values.out, `${JSON.stringify(contract, null, 2)}\n`);
       console.error(`${contract.tools.length} tools captured from ${contract.server}`);
       return 0;
@@ -65,7 +67,7 @@ async function main(): Promise<number> {
       const result = await runGolden(
         readJson<Contract>(a),
         readJson<GoldenCase[]>(b),
-        ollamaAsk(values.model),
+        ollamaAsk(values.model, resolveOllamaUrl(process.env.MCP_LAB_OLLAMA_URL)),
         values.model,
         repeat,
       );
