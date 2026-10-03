@@ -1,10 +1,12 @@
 // Runs a hosted check for CI and writes diff.json / lint.json in the same shape as
 // the local CLI, so the PR comment step is shared. Never exits non-zero itself:
 // the action fails the job in its last step, after the PR comment is posted.
-// Env: HOSTED_URL, API_TOKEN, SERVER_ID, GITHUB_OUTPUT (optional).
+// Env: HOSTED_URL, API_TOKEN, SERVER_ID, GITHUB_OUTPUT (optional),
+// VERCEL_AUTOMATION_BYPASS_SECRET (optional; set the protection-bypass header).
 import { appendFileSync, writeFileSync } from "node:fs";
 
 const { HOSTED_URL, API_TOKEN, SERVER_ID, GITHUB_OUTPUT } = process.env;
+const BYPASS = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 const output = (key: string, value: string | number | boolean) => {
   console.log(`${key}=${value}`);
   if (GITHUB_OUTPUT) appendFileSync(GITHUB_OUTPUT, `${key}=${value}\n`);
@@ -33,7 +35,10 @@ async function main() {
     `${HOSTED_URL.replace(/\/+$/, "")}/api/v1/servers/${encodeURIComponent(SERVER_ID)}/checks`,
     {
       method: "POST",
-      headers: { authorization: `Bearer ${API_TOKEN}` },
+      headers: {
+        authorization: `Bearer ${API_TOKEN}`,
+        ...(BYPASS ? { "x-vercel-protection-bypass": BYPASS } : {}),
+      },
       signal: AbortSignal.timeout(310_000),
     },
   );
@@ -43,6 +48,12 @@ async function main() {
   if (!res.ok)
     throw new Error(
       `hosted check failed (${res.status}): ${body.error ?? "no details"}`,
+    );
+  // A 200 that isn't a snapshot body means an auth wall or proxy page answered,
+  // not the app; say so instead of crashing on [...undefined].
+  if (!Array.isArray(body.changes))
+    throw new Error(
+      `hosted check returned HTTP ${res.status} from ${res.url} without a snapshot body (content-type ${res.headers.get("content-type")}) — likely a login or challenge page`,
     );
 
   const findings = [...body.changes];
